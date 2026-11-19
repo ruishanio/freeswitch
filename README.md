@@ -20,8 +20,7 @@ docker buildx build --provenance=false --load \
 启动一个本地容器，并查看健康状态。
 
 ```sh
-docker run -d --rm --name freeswitch-demo \
-  --network none local/freeswitch:1.11.3
+docker run -d --rm --name freeswitch-demo local/freeswitch:1.11.3
 docker inspect --format '{{.State.Health.Status}}' freeswitch-demo
 ```
 
@@ -35,6 +34,8 @@ docker stop freeswitch-demo
 ## 容器配置
 
 首次启动会把 vanilla 配置复制到 `/etc/freeswitch` 并生成随机 SIP 密码。需要保留配置时，可在 `docker run` 时添加 `-v freeswitch-conf:/etc/freeswitch`。该目录已包含 `freeswitch.xml` 时，入口脚本会沿用已有配置和密码。
+
+vanilla 配置通过 STUN 发现对外通告的地址。离线部署时，在挂载的 `vars.xml` 中将 `external_sip_ip` 和 `external_rtp_ip` 的 `stun-set` 改为 `set`，并分别填写 SIP 对端可达的信令和媒体地址。
 
 | 容器路径 | 用途 |
 | --- | --- |
