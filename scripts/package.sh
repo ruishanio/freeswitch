@@ -3,13 +3,18 @@
 set -euo pipefail
 
 root=/rootfs
+multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
 share=$root/usr/share/freeswitch
 modules=$root/usr/lib/freeswitch/mod
-mkdir -p "$root"/{etc,usr/bin,usr/lib,usr/lib64,usr/share/doc/freeswitch} "$modules" \
+mkdir -p "$root"/{etc,usr/bin,usr/lib,usr/share/doc/freeswitch} "$modules" \
     "$share"/{conf,fonts,lang,scripts,sounds,tz} "$root/var/lib/freeswitch/images"
 ln -s usr/bin "$root/bin"
 ln -s usr/lib "$root/lib"
-ln -s usr/lib64 "$root/lib64"
+# 仅部分 Debian 架构通过 /lib64 提供 ELF 解释器。
+if [[ -d /usr/lib64 ]]; then
+    mkdir -p "$root/usr/lib64"
+    ln -s usr/lib64 "$root/lib64"
+fi
 
 # 仅收集本次编译产物。遇到漏编或意外增加的模块，在组装阶段就中止。
 diff -u <(sed 's|.*/||; s/$/.so/' modules.conf | LC_ALL=C sort) \
@@ -55,7 +60,7 @@ awk '$2 == "=>" && $3 ~ /^\// {print $3} $1 ~ /^\// && $2 ~ /^\(/ {print $1}' \
     /tmp/dependencies | LC_ALL=C sort -u > /tmp/libraries
 while IFS= read -r path; do copy_chain "$path"; done < /tmp/libraries
 # glibc 的字符集转换和名称解析插件由运行时按需加载，ldd 无法枚举。
-dpkg-query -L libc6:amd64 | sed -n 's|^/\(usr/lib/x86_64-linux-gnu/.*\)|\1|p' > /tmp/glibc-files
+dpkg-query -L "libc6:$(dpkg --print-architecture)" | awk -v prefix="/usr/lib/$multiarch/" 'index($0, prefix) == 1 {print substr($0, 2)}' > /tmp/glibc-files
 tar -C / --no-recursion -cf - -T /tmp/glibc-files | tar -C "$root" -xf -
 strip --strip-unneeded "${binaries[@]}" "$root"/usr/lib/libfreeswitch.so.1.0.0
 
@@ -78,7 +83,7 @@ mkdir -p "$root/etc/ssl"
 cp -a /etc/ssl/certs "$root/etc/ssl/"
 cp -a /usr/share/ca-certificates "$root/usr/share/"
 cp /etc/nsswitch.conf "$root/etc/"
-copy_chain /etc/ld.so.conf.d/x86_64-linux-gnu.conf
+copy_chain "/etc/ld.so.conf.d/$multiarch.conf"
 copy_chain /usr/sbin/update-ca-certificates
 install -D -m 0644 debian/freeswitch-systemd.freeswitch.service "$root/usr/lib/systemd/system/freeswitch.service"
 install -D -m 0644 debian/freeswitch-systemd.freeswitch.tmpfile "$root/usr/lib/tmpfiles.d/freeswitch.conf"

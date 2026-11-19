@@ -1,7 +1,6 @@
 # 编译环境基于官方 Debian 13，系统依赖由 Debian 仓库提供。
 FROM debian:trixie-slim AS toolchain
-ARG TARGETARCH
-RUN test "$TARGETARCH" = amd64 && apt-get update && \
+RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential autoconf autoconf-archive automake libtool libtool-bin pkg-config cmake \
         bison nasm yasm swig git patch ca-certificates curl file default-jdk-headless \
@@ -23,7 +22,7 @@ ADD --checksum=sha256:358142a6d063c469661306b7191068e0b8cc509f2f78ece2d2cd3db0f5
 ADD --checksum=sha256:1cb9a0ee3a68a20e84db9702cb82ac643b27e15820e74eb5a69511952dfa27b2 https://codeload.github.com/freeswitch/spandsp/tar.gz/8f1e1646bdec99eac5fd2cd92c35563f736b9b89 /tmp/spandsp.tar.gz
 RUN --network=none set -eu; for name in broadvoice silk spandsp; do \
         mkdir "$name"; tar -xf "/tmp/$name.tar.gz" -C "$name" --strip-components=1; \
-        libdir=/usr/lib; if [ "$name" = spandsp ]; then libdir=/usr/lib/x86_64-linux-gnu; fi; \
+        libdir=/usr/lib; if [ "$name" = spandsp ]; then libdir=/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH); fi; \
         (cd "$name" && autoreconf -fi && ./configure --prefix=/usr --libdir="$libdir" && \
             make -j4 && make DESTDIR=/out install); \
     done

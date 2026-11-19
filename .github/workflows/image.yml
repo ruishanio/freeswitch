@@ -6,13 +6,29 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
 
 jobs:
   image:
-    runs-on: ubuntu-24.04
+    name: 构建并验证 ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    env:
+      PLATFORM: linux/${{ matrix.arch }}
+      IMAGE: localhost/freeswitch:${{ matrix.arch }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -30,11 +46,48 @@ jobs:
           # 允许相同核心版本独立修订镜像，如 v1.11.3-r1。
           [[ $tag == "$version" || ( ${tag%-r*} == "$version" && ${tag##*-r} =~ ^[1-9][0-9]*$ ) ]]
 
-      - name: 从源码编译并装载镜像
-        run: docker buildx build --platform linux/amd64 --provenance=false --load -t local/freeswitch:candidate .
+      - name: 从源码编译并在原生架构验收
+        run: |
+          docker buildx build --platform "$PLATFORM" --provenance=false --load -t "$IMAGE" .
+          python3 scripts/verify.py "$IMAGE" --platform "$PLATFORM" --standalone
 
-      - name: 对照上游镜像验证
-        run: python3 scripts/verify.py local/freeswitch:candidate
+      - name: 导出本次通过验收的镜像
+        run: docker save "$IMAGE" | gzip -1 > "$RUNNER_TEMP/${{ matrix.arch }}.tar.gz"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/${{ matrix.arch }}.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 2
+
+  manifest:
+    name: 组装多架构镜像
+    needs: image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: image-*
+          path: ${{ runner.temp }}/images
+          merge-multiple: true
+
+      - name: 从已验证的镜像组装并核对平台清单
+        shell: bash
+        run: |
+          set -euo pipefail
+          podman manifest create localhost/freeswitch:release
+          for arch in amd64 arm64; do
+            podman load -i "$RUNNER_TEMP/images/$arch.tar.gz"
+            image="localhost/freeswitch:$arch"
+            [[ "$(podman image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" == "linux/$arch" ]]
+            podman manifest add localhost/freeswitch:release "containers-storage:$image"
+          done
+          # 先导出完整 OCI 索引，分支构建也检查真正用于发布的清单。
+          podman manifest push --all --format oci localhost/freeswitch:release "oci:$RUNNER_TEMP/index:release"
+          skopeo inspect --raw "oci:$RUNNER_TEMP/index:release" | jq -e \
+            '([.manifests[].platform | .os + "/" + .architecture] | sort) == ["linux/amd64", "linux/arm64"]'
 
       - name: 登录 Docker Hub
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -43,7 +96,7 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: 发布已验证的镜像
+      - name: 发布多架构版本标签
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
           REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
@@ -53,12 +106,12 @@ jobs:
         run: |
           set -euo pipefail
           : "${REPOSITORY:?请设置 Docker Hub 仓库名，例如 myorg/freeswitch}"
-          image="docker.io/$REPOSITORY:${RELEASE_TAG#v}"
-          docker tag local/freeswitch:candidate "$image"
-          docker push "$image"
-          docker buildx imagetools inspect "$image" >> "$GITHUB_STEP_SUMMARY"
-          # 只允许显式选中的发布版本更新 latest，补发历史版本不会回退默认镜像。
+          repo="docker.io/$REPOSITORY"
+          skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" \
+            "oci:$RUNNER_TEMP/index:release" "docker://$repo:${RELEASE_TAG#v}"
+          source="$repo@$(cat "$RUNNER_TEMP/digest")"
+          # latest 指向同一份远端清单，补发历史版本不会回退默认标签。
           if [[ $RELEASE_TAG == "$LATEST_TAG" ]]; then
-            docker tag local/freeswitch:candidate "docker.io/$REPOSITORY:latest"
-            docker push "docker.io/$REPOSITORY:latest"
+            docker buildx imagetools create --tag "$repo:latest" "$source"
           fi
+          docker buildx imagetools inspect "$source" >> "$GITHUB_STEP_SUMMARY"
