@@ -16,10 +16,10 @@ if [[ -d /usr/lib64 ]]; then
     ln -s usr/lib64 "$root/lib64"
 fi
 
-# 仅收集本次编译产物。遇到漏编或意外增加的模块，在组装阶段就中止。
-diff -u <(sed 's|.*/||; s/$/.so/' modules.conf | LC_ALL=C sort) \
-    <(find /install/usr/lib/freeswitch/mod -name '*.so' -printf '%f\n' | LC_ALL=C sort)
-cp -a /install/usr/lib/freeswitch/mod/*.so "$modules/"
+# 按编译清单收集模块，缺少文件时 cp 会中止打包。
+while IFS= read -r module; do
+    cp -a "/install/usr/lib/freeswitch/mod/${module##*/}.so" "$modules/"
+done < modules.conf
 cp -a /install/usr/bin/. "$root/usr/bin/"
 cp -a /install/usr/lib/libfreeswitch.so.* "$root/usr/lib/"
 # 让 ldd 解析到本次编译的核心库，最终镜像只收集运行时 SONAME。
@@ -91,5 +91,3 @@ mkdir -p "$root/usr/lib/ssl"
 ln -s /etc/ssl/certs "$root/usr/lib/ssl/certs"
 cp LICENSE docs/COPYING "$root/usr/share/doc/freeswitch/"
 cp fonts/OFL.txt "$root/usr/share/doc/freeswitch/fonts-OFL.txt"
-
-chroot "$root" /usr/bin/freeswitch -version

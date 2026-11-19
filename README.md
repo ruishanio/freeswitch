@@ -1,6 +1,6 @@
 # FreeSWITCH Docker 镜像
 
-[![构建与验证](https://github.com/ruishanio/freeswitch/actions/workflows/image.yml/badge.svg?branch=main)](https://github.com/ruishanio/freeswitch/actions/workflows/image.yml)
+[![镜像构建](https://github.com/ruishanio/freeswitch/actions/workflows/image.yml/badge.svg?branch=main)](https://github.com/ruishanio/freeswitch/actions/workflows/image.yml)
 
 从 FreeSWITCH 1.11.3 源码构建的 Docker 镜像，支持 **Linux AMD64** 和 **Linux ARM64**。两个架构均包含 103 个模块。编译环境使用官方 `debian:trixie-slim`，运行镜像从 `scratch` 组装。模块、安装路径、vanilla 配置和容器启动行为以 `safarov/freeswitch:1.11.3` 为兼容性基准。
 
@@ -17,7 +17,7 @@ docker buildx build --provenance=false --load \
 
 在另一种架构上构建时，可在 Buildx 命令中指定 `--platform linux/amd64` 或 `--platform linux/arm64`，本机需要已配置相应的模拟器或原生构建节点。
 
-启动一个仅用于本机验证的容器，并查看健康状态。
+启动一个本地容器，并查看健康状态。
 
 ```sh
 docker run -d --rm --name freeswitch-demo \
@@ -49,22 +49,6 @@ docker stop freeswitch-demo
 | `EPMD` | 设为 `true` 时启动 Erlang Port Mapper Daemon。 |
 | `DUMPCAP` | 设为 `true` 时启动滚动抓包，文件写入 `/dumpcap`。 |
 
-## 镜像验收
-
-使用 Python 3 运行与 CI 相同的验收命令。脚本根据本地镜像选择架构，也可以用 `--platform linux/amd64` 或 `--platform linux/arm64` 明确指定。
-
-```sh
-python3 scripts/verify.py local/freeswitch:1.11.3 --standalone
-```
-
-验收脚本只启动本次构建的镜像，在隔离容器中检查以下行为，结束后自动清理容器。
-
-- 核对 103 个模块，在当前架构上逐项解析共享库，并检查默认加载的命令和事件套接字模块。
-- 检查运行目录、vanilla 配置、时区文件和字体。
-- 检查 ESL 状态、Docker 健康检查、EPMD、抓包、正常停止，以及重启后配置和密码的保留。
-
-如需在本地排查与上游的差异，可对 AMD64 镜像运行 `python3 scripts/verify.py local/freeswitch:1.11.3 --platform linux/amd64`。这会额外启动固定摘要的 AMD64 参考镜像，对比共享库、资源文件哈希、默认加载模块和容器配置。
-
 ## 使用 GitHub Actions 发布到 Docker Hub
 
 源码和工作流托管在 GitHub，镜像发布到 Docker Hub。首次发布前，创建目标 Docker Hub 仓库，并在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中配置以下项目。
@@ -76,20 +60,20 @@ python3 scripts/verify.py local/freeswitch:1.11.3 --standalone
 | Secret | `DOCKERHUB_TOKEN` | 对目标仓库有读写权限的 Docker Hub 访问令牌 |
 | Variable（可选） | `DOCKERHUB_LATEST_TAG` | 同时更新 `latest` 的 Git 标签，例如 `v1.11.3` |
 
-Pull Request、推送到 `main` 和手动运行工作流都会在两个架构的原生 Linux 节点上分别构建和验收，然后检查合并的多架构镜像清单。要发布版本，在准备发布的提交上创建并推送 Git 标签。
+Pull Request、推送到 `main` 和手动运行工作流都会在两个架构的原生 Linux 节点上分别编译镜像。版本标签触发的工作流会将两个架构打包为一份镜像清单，并推送到 Docker Hub。要发布版本，在准备发布的提交上创建并推送 Git 标签。
 
 ```sh
 git tag v1.11.3
 git push origin v1.11.3
 ```
 
-标签格式为 `v<版本>`，版本取自 [VERSION](VERSION)。同一版本重新打包可追加 `-r1`、`-r2` 等修订号。例如，`v1.11.3-r1` 通过验收后会发布为 `myorg/freeswitch:1.11.3-r1`。两个架构共用同一个版本标签，Docker 拉取时会自动选择与宿主机匹配的镜像。工作流摘要记录多架构镜像的摘要。
+标签格式为 `v<版本>`，版本取自 [VERSION](VERSION)。同一版本重新打包可追加 `-r1`、`-r2` 等修订号。例如，`v1.11.3-r1` 会发布为 `myorg/freeswitch:1.11.3-r1`。两个架构共用同一个版本标签，Docker 拉取时会自动选择与宿主机匹配的镜像。工作流摘要记录多架构镜像的摘要。
 
 ## 维护与上游来源
 
 - 调整编译选项或依赖版本时，更新 [Dockerfile](Dockerfile) 中的源码提交和 SHA-256 校验值。FreeSWITCH 核心和模块默认使用 4 个并行编译任务，可在构建时传入 `--build-arg JOBS=2` 调整。
-- 增减模块时，修改[模块清单](modules.conf)。[打包脚本](scripts/package.sh) 会核对实际安装的模块并收集运行依赖。
-- 升级 FreeSWITCH 时，同步更新 [VERSION](VERSION)、源码锁定值和[验收脚本](scripts/verify.py)中的参考镜像摘要，再检查新版的模块和配置差异。
+- 增减模块时，修改[模块清单](modules.conf)。[打包脚本](scripts/package.sh) 按清单收集模块及其运行依赖。
+- 升级 FreeSWITCH 时，同步更新 [VERSION](VERSION)、Dockerfile 中的源码提交和校验值，并按新版调整模块清单。
 - 入口脚本和健康检查沿用参考镜像的实现，保留原作者声明。脚本许可证见 [image/COPYING](image/COPYING)。
 
 [FreeSWITCH 1.11.3 源码](https://github.com/signalwire/freeswitch/tree/ef32e205295e29f034f1453ad245ba5efb07b94a) · [参考镜像](https://hub.docker.com/r/safarov/freeswitch) · [发布工作流](.github/workflows/image.yml)

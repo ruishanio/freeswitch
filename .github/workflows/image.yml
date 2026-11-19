@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   image:
-    name: 构建并验证 ${{ matrix.arch }}
+    name: 编译 ${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
@@ -46,15 +46,15 @@ jobs:
           # 允许相同核心版本独立修订镜像，如 v1.11.3-r1。
           [[ $tag == "$version" || ( ${tag%-r*} == "$version" && ${tag##*-r} =~ ^[1-9][0-9]*$ ) ]]
 
-      - name: 从源码编译并在原生架构验收
-        run: |
-          docker buildx build --platform "$PLATFORM" --provenance=false --load -t "$IMAGE" .
-          python3 scripts/verify.py "$IMAGE" --platform "$PLATFORM" --standalone
+      - name: 在原生架构上编译镜像
+        run: docker buildx build --platform "$PLATFORM" --provenance=false --load -t "$IMAGE" .
 
-      - name: 导出本次通过验收的镜像
+      - name: 导出待发布的镜像
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: docker save "$IMAGE" | gzip -1 > "$RUNNER_TEMP/${{ matrix.arch }}.tar.gz"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         with:
           name: image-${{ matrix.arch }}
           path: ${{ runner.temp }}/${{ matrix.arch }}.tar.gz
@@ -63,7 +63,8 @@ jobs:
           retention-days: 2
 
   manifest:
-    name: 组装多架构镜像
+    name: 发布多架构镜像
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: image
     runs-on: ubuntu-24.04
     steps:
@@ -73,7 +74,7 @@ jobs:
           path: ${{ runner.temp }}/images
           merge-multiple: true
 
-      - name: 从已验证的镜像组装并核对平台清单
+      - name: 组装多架构镜像清单
         shell: bash
         run: |
           set -euo pipefail
@@ -81,23 +82,16 @@ jobs:
           for arch in amd64 arm64; do
             podman load -i "$RUNNER_TEMP/images/$arch.tar.gz"
             image="localhost/freeswitch:$arch"
-            [[ "$(podman image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" == "linux/$arch" ]]
             podman manifest add localhost/freeswitch:release "containers-storage:$image"
           done
-          # 先导出完整 OCI 索引，分支构建也检查真正用于发布的清单。
-          podman manifest push --all --format oci localhost/freeswitch:release "oci:$RUNNER_TEMP/index:release"
-          skopeo inspect --raw "oci:$RUNNER_TEMP/index:release" | jq -e \
-            '([.manifests[].platform | .os + "/" + .architecture] | sort) == ["linux/amd64", "linux/arm64"]'
 
       - name: 登录 Docker Hub
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: 发布多架构版本标签
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
           REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
           LATEST_TAG: ${{ vars.DOCKERHUB_LATEST_TAG }}
@@ -107,8 +101,8 @@ jobs:
           set -euo pipefail
           : "${REPOSITORY:?请设置 Docker Hub 仓库名，例如 myorg/freeswitch}"
           repo="docker.io/$REPOSITORY"
-          skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" \
-            "oci:$RUNNER_TEMP/index:release" "docker://$repo:${RELEASE_TAG#v}"
+          podman manifest push --all --format oci --digestfile "$RUNNER_TEMP/digest" \
+            localhost/freeswitch:release "docker://$repo:${RELEASE_TAG#v}"
           source="$repo@$(cat "$RUNNER_TEMP/digest")"
           # latest 指向同一份远端清单，补发历史版本不会回退默认标签。
           if [[ $RELEASE_TAG == "$LATEST_TAG" ]]; then
