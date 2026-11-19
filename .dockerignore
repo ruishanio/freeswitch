@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!modules.conf
+!image/
+!image/**
+!scripts/
+!scripts/package.sh

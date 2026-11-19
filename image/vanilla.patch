@@ -1,0 +1,28 @@
+--- a/vars.xml
++++ b/vars.xml
+@@ -13,6 +13,7 @@
+        WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
+   -->
+   <X-PRE-PROCESS cmd="set" data="default_password=1234"/>
++  <X-PRE-PROCESS cmd="set" data="disable_system_api_commands=true"/>
+   <!-- Did you change it yet? -->
+   <!--
+       The following variables are set dynamically - calculated if possible by freeswitch - and
+--- a/autoload_configs/logfile.conf.xml
++++ b/autoload_configs/logfile.conf.xml
+@@ -25,5 +25,15 @@
+ 	<map name="all" value="console,debug,info,notice,warning,err,crit,alert"/>
+       </mappings>
+     </profile>
++    <profile name="stdout">
++        <settings>
++            <param name="logfile" value="/dev/stdout"/>
++            <param name="rollover" value="0"/>
++            <param name="uuid" value="true" />
++        </settings>
++        <mappings>
++            <map name="all" value="warning,err,crit,alert"/>
++        </mappings>
++    </profile>
+   </profiles>
+ </configuration>

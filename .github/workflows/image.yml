@@ -1,0 +1,64 @@
+name: 构建 FreeSWITCH 镜像
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: 核对发布标签
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cat VERSION)
+          tag=${RELEASE_TAG#v}
+          # 允许相同核心版本独立修订镜像，如 v1.11.3-r1。
+          [[ $tag == "$version" || ( ${tag%-r*} == "$version" && ${tag##*-r} =~ ^[1-9][0-9]*$ ) ]]
+
+      - name: 从源码编译并装载镜像
+        run: docker buildx build --platform linux/amd64 --provenance=false --load -t local/freeswitch:candidate .
+
+      - name: 对照上游镜像验证
+        run: python3 scripts/verify.py local/freeswitch:candidate
+
+      - name: 登录 Docker Hub
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 发布已验证的镜像
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+          LATEST_TAG: ${{ vars.DOCKERHUB_LATEST_TAG }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${REPOSITORY:?请设置 Docker Hub 仓库名，例如 myorg/freeswitch}"
+          image="docker.io/$REPOSITORY:${RELEASE_TAG#v}"
+          docker tag local/freeswitch:candidate "$image"
+          docker push "$image"
+          docker buildx imagetools inspect "$image" >> "$GITHUB_STEP_SUMMARY"
+          # 只允许显式选中的发布版本更新 latest，补发历史版本不会回退默认镜像。
+          if [[ $RELEASE_TAG == "$LATEST_TAG" ]]; then
+            docker tag local/freeswitch:candidate "docker.io/$REPOSITORY:latest"
+            docker push "docker.io/$REPOSITORY:latest"
+          fi

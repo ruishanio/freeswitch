@@ -1,0 +1,2 @@
+# 镜像内脚本和配置参与字节校验，Windows 检出也要保留 LF。
+* text=auto eol=lf
