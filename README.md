@@ -71,9 +71,9 @@ git push origin v1.11.3
 
 ## 维护与上游来源
 
-- 调整编译选项或依赖版本时，更新 [Dockerfile](Dockerfile) 中的源码提交和 SHA-256 校验值。FreeSWITCH 核心和模块默认使用 4 个并行编译任务，可在构建时传入 `--build-arg JOBS=2` 调整。
+- 编译选项和依赖版本在 [Dockerfile](Dockerfile) 中维护。libks 和 SignalWire C 客户端按提交号下载。FreeSWITCH 核心和模块默认使用 4 个并行编译任务，可在构建时传入 `--build-arg JOBS=2` 调整。
 - 增减模块时，修改[模块清单](modules.conf)。[打包脚本](scripts/package.sh) 按清单收集模块及其运行依赖。
-- 升级 FreeSWITCH 时，同步更新 [VERSION](VERSION)、Dockerfile 中的源码提交和校验值，并按新版调整模块清单。
+- 升级 FreeSWITCH 时，同步更新 [VERSION](VERSION)、Dockerfile 中的 FreeSWITCH 版本标签，并按新版调整模块清单。
 - 入口脚本和健康检查沿用参考镜像的实现，保留原作者声明。脚本许可证见 [image/COPYING](image/COPYING)。
 
-[FreeSWITCH 1.11.3 源码](https://github.com/signalwire/freeswitch/tree/ef32e205295e29f034f1453ad245ba5efb07b94a) · [参考镜像](https://hub.docker.com/r/safarov/freeswitch) · [发布工作流](.github/workflows/image.yml)
+[FreeSWITCH 1.11.3 源码](https://github.com/signalwire/freeswitch/tree/v1.11.3) · [参考镜像](https://hub.docker.com/r/safarov/freeswitch) · [发布工作流](.github/workflows/image.yml)
