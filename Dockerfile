@@ -79,7 +79,5 @@ FROM scratch
 WORKDIR /
 COPY --from=package /rootfs/ /
 COPY --chmod=0755 image/entrypoint.sh /
-COPY --chmod=0775 image/healthcheck.sh /
 COPY --chmod=0664 image/sounds_version.txt /
-HEALTHCHECK --interval=15s --timeout=5s CMD /healthcheck.sh
 ENTRYPOINT ["/entrypoint.sh"]

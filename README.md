@@ -7,6 +7,6 @@
 在仓库根目录构建并启动容器。
 
 ```sh
-docker build -t local/freeswitch:1.11.3 .
-docker run -d --name freeswitch -v freeswitch-conf:/etc/freeswitch local/freeswitch:1.11.3
+docker build -t local/freeswitch:1.11.3-r1 .
+docker run -d --name freeswitch -v freeswitch-conf:/etc/freeswitch local/freeswitch:1.11.3-r1
 ```
